@@ -1,0 +1,11 @@
+title = "fluent-bit-gitleaks"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "kv-pair-secret"
+description = "Secret in a protobuf-text key/value pair, raw or JSON-escaped: key:\"secret-key\" value:\"...\""
+regex = '''(?i)key:\\?"[\w.-]*(?:secret|passw(?:or)?d|token|access|credential)[\w.-]*\\?"\s*value:\\?"([^"\\]+)\\?"'''
+secretGroup = 1
+keywords = ["value:"]

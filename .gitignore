@@ -1,0 +1,4 @@
+vendor/
+filter.wasm
+test/.work.*
+*.aot
