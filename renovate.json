@@ -1,0 +1,40 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^test/fluent-bit-image$/"
+      ],
+      "matchStrings": [
+        "^(?<depName>[^:\\s]+):(?<currentValue>\\S+)"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": [
+        "cr.fluentbit.io/fluent/fluent-bit"
+      ],
+      "description": "A fluent-bit bump must keep the bundled WAMR equal to the Dockerfile WAMR_VERSION; hack/check-wamr.sh fails the PR otherwise.",
+      "automerge": false
+    },
+    {
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "ubuntu"
+      ],
+      "enabled": false,
+      "description": "The wamrc release asset is built for ubuntu-22.04; the base moves with WAMR_VERSION by hand."
+    }
+  ]
+}

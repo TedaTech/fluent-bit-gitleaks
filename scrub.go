@@ -1,8 +1,8 @@
 package main
 
 import (
-	_ "embed"
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"strings"
 
@@ -14,7 +14,7 @@ import (
 //go:embed gitleaks.toml
 var rules string
 
-var stub = []byte(`{"log":"REDACTED:scrub-error"}`)
+var scrubErrorRecord = []byte(`{"log":"REDACTED:scrub-error"}`)
 
 type Scrubber struct {
 	d *detect.Detector
@@ -42,14 +42,14 @@ func (s *Scrubber) Scrub(record []byte) []byte {
 	dec.UseNumber()
 	var body map[string]any
 	if err := dec.Decode(&body); err != nil {
-		return stub
+		return scrubErrorRecord
 	}
 	if !s.walk(body) {
 		return record
 	}
 	out, err := json.Marshal(body)
 	if err != nil {
-		return stub
+		return scrubErrorRecord
 	}
 	return out
 }
@@ -59,30 +59,29 @@ func (s *Scrubber) walk(v any) bool {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, e := range t {
-			if str, ok := e.(string); ok {
-				if r, ok := s.redact(str); ok {
-					t[k], changed = r, true
-				}
-			} else if s.walk(e) {
-				changed = true
+			if r, ok := s.visit(k+"=", e); ok {
+				t[k], changed = r, true
 			}
 		}
 	case []any:
 		for i, e := range t {
-			if str, ok := e.(string); ok {
-				if r, ok := s.redact(str); ok {
-					t[i], changed = r, true
-				}
-			} else if s.walk(e) {
-				changed = true
+			if r, ok := s.visit("", e); ok {
+				t[i], changed = r, true
 			}
 		}
 	}
 	return changed
 }
 
-func (s *Scrubber) redact(str string) (string, bool) {
-	findings := s.d.DetectString(str)
+func (s *Scrubber) visit(context string, e any) (any, bool) {
+	if str, ok := e.(string); ok {
+		return s.redact(context, str)
+	}
+	return e, s.walk(e)
+}
+
+func (s *Scrubber) redact(context, str string) (string, bool) {
+	findings := s.d.DetectString(context + str)
 	if len(findings) == 0 {
 		return str, false
 	}

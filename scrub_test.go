@@ -65,7 +65,7 @@ func TestScrubNested(t *testing.T) {
 
 func TestScrubFailsClosed(t *testing.T) {
 	s := scrubber(t)
-	if out := string(s.Scrub([]byte(`{"log":"api_key=` + apiSecret))); out != string(stub) {
+	if out := string(s.Scrub([]byte(`{"log":"api_key=` + apiSecret))); out != string(scrubErrorRecord) {
 		t.Fatalf("got %s", out)
 	}
 }
@@ -89,4 +89,12 @@ func scrubber(t *testing.T) *Scrubber {
 		t.Fatal(err)
 	}
 	return s
+}
+
+func TestScrubUsesFieldNameAsContext(t *testing.T) {
+	s := scrubber(t)
+	out := string(s.Scrub([]byte(`{"api_key":"` + apiSecret + `","msg":"login ok"}`)))
+	if strings.Contains(out, apiSecret) || !strings.Contains(out, `"api_key":"REDACTED:generic-api-key"`) {
+		t.Fatalf("got %s", out)
+	}
 }

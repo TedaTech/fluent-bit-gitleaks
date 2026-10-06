@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
-image=${FLUENT_BIT_IMAGE:-cr.fluentbit.io/fluent/fluent-bit:5.1.3}
+here=$(cd "$(dirname "$0")" && pwd)
+image=${FLUENT_BIT_IMAGE:-$(cat "$here/fluent-bit-image")}
+dist=${DIST:-$here/../dist}
 n=${N:-20000}
 port=${PORT:-2020}
 mode=$([ -n "${BASELINE:-}" ] && echo baseline || echo wasm)
-here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d "$here/.work.XXXX")
 trap 'docker rm -f fbg-bench >/dev/null 2>&1 || true; rm -rf "$work"' EXIT
 python3 "$here/gen.py" "$n" > "$work/in.jsonl"
 mkdir -p "$work/out"
-filter=$here/${FILTER_CONF:-filter.conf}
+filter=$here/filter.conf
 [ "$mode" = baseline ] && { : > "$work/none.conf"; filter=$work/none.conf; }
 docker run -d --name fbg-bench -p "$port:2020" \
-  -v "$here/..:/wasm:ro" -v "$here:/bench:ro" -v "$filter:/bench/filter.conf:ro" \
+  -v "$dist:/wasm:ro" -v "$here:/bench:ro" -v "$filter:/bench/filter.conf:ro" \
   -v "$work:/data:ro" -v "$work/out:/out" \
   "$image" /fluent-bit/bin/fluent-bit -c /bench/bench.conf >/dev/null
 running() {
@@ -31,10 +32,17 @@ until [ "$(metric output proc_records)" -ge "$n" ]; do
 done
 end=$(date +%s.%N)
 docker stop fbg-bench >/dev/null
-python3 -c "import sys;s,e,n,p=map(float,sys.argv[2:]);print(f'{sys.argv[1]}: {int(n)} records in {e-s:.1f}s = {n/(e-s):.0f} rec/s, peak mem {p:.0f} MiB')" \
-  "$mode" "$start" "$end" "$n" "$peak"
+rate=$(python3 -c "import sys;s,e,n=map(float,sys.argv[1:]);print(int(n/(e-s)))" "$start" "$end" "$n")
+python3 -c "import sys;print(f'{sys.argv[1]}: {sys.argv[2]} records, {sys.argv[3]} rec/s, peak mem {float(sys.argv[4]):.0f} MiB')" \
+  "$mode" "$n" "$rate" "$peak"
 [ "$mode" = baseline ] && exit 0
-want=$(cd "$here/.." && go run . < "$work/in.jsonl" | grep -c REDACTED)
-got=$(grep -c REDACTED "$work/out/out.jsonl")
-echo "redacted $got/$want records native gitleaks redacts"
-[ "$got" = "$want" ]
+(cd "$here/.." && go run . < "$work/in.jsonl") > "$work/want.jsonl"
+python3 - "$work/want.jsonl" "$work/out/out.jsonl" <<'PY'
+import json, sys
+want, got = (sorted(json.loads(l)["log"] for l in open(p)) for p in sys.argv[1:])
+missing = [l for l in want if "REDACTED" in l and l not in got]
+print(f"redacted {sum('REDACTED' in l for l in got)} records, native gitleaks {sum('REDACTED' in l for l in want)}")
+if want != got or missing:
+    sys.exit(f"wasm output differs from native gitleaks, e.g. {missing[:3]}")
+PY
+[ "$rate" -ge "${MIN_RATE:-0}" ] || { echo "$rate rec/s is below MIN_RATE=$MIN_RATE" >&2; exit 1; }
