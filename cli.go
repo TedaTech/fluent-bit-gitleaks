@@ -9,6 +9,10 @@ import (
 )
 
 func main() {
+	tag := "kube.cli"
+	if len(os.Args) > 1 {
+		tag = os.Args[1]
+	}
 	s, err := NewScrubber()
 	if err != nil {
 		log.Fatal(err)
@@ -18,7 +22,7 @@ func main() {
 	out := bufio.NewWriter(os.Stdout)
 	defer out.Flush()
 	for in.Scan() {
-		out.Write(s.Scrub(in.Bytes()))
+		out.Write(s.Scrub(tag, in.Bytes()))
 		out.WriteByte('\n')
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -15,6 +16,10 @@ import (
 var rules string
 
 var scrubErrorRecord = []byte(`{"log":"REDACTED:scrub-error"}`)
+
+// pii-* rules apply only to tenant-facing records; node and audit logs keep
+// their addresses (infra debugging, security forensics).
+var piiTags = regexp.MustCompile(`^(kube|events)(\.|$)`)
 
 type Scrubber struct {
 	d *detect.Detector
@@ -37,14 +42,14 @@ func NewScrubber() (*Scrubber, error) {
 	return &Scrubber{d: detect.NewDetector(cfg)}, nil
 }
 
-func (s *Scrubber) Scrub(record []byte) []byte {
+func (s *Scrubber) Scrub(tag string, record []byte) []byte {
 	dec := json.NewDecoder(bytes.NewReader(record))
 	dec.UseNumber()
 	var body map[string]any
 	if err := dec.Decode(&body); err != nil {
 		return scrubErrorRecord
 	}
-	if !s.walk(body) {
+	if !s.walk(tag, body) {
 		return record
 	}
 	out, err := json.Marshal(body)
@@ -54,18 +59,18 @@ func (s *Scrubber) Scrub(record []byte) []byte {
 	return out
 }
 
-func (s *Scrubber) walk(v any) bool {
+func (s *Scrubber) walk(tag string, v any) bool {
 	changed := false
 	switch t := v.(type) {
 	case map[string]any:
 		for k, e := range t {
-			if r, ok := s.visit(k+"=", e); ok {
+			if r, ok := s.visit(tag, k+"=", e); ok {
 				t[k], changed = r, true
 			}
 		}
 	case []any:
 		for i, e := range t {
-			if r, ok := s.visit("", e); ok {
+			if r, ok := s.visit(tag, "", e); ok {
 				t[i], changed = r, true
 			}
 		}
@@ -73,22 +78,28 @@ func (s *Scrubber) walk(v any) bool {
 	return changed
 }
 
-func (s *Scrubber) visit(context string, e any) (any, bool) {
+func (s *Scrubber) visit(tag, context string, e any) (any, bool) {
 	if str, ok := e.(string); ok {
-		return s.redact(context, str)
+		return s.redact(tag, context, str)
 	}
-	return e, s.walk(e)
+	return e, s.walk(tag, e)
 }
 
-func (s *Scrubber) redact(context, str string) (string, bool) {
+func (s *Scrubber) redact(tag, context, str string) (string, bool) {
 	findings := s.d.DetectString(context + str)
 	if len(findings) == 0 {
 		return str, false
 	}
+	changed := false
 	for _, f := range findings {
-		if f.Secret != "" {
-			str = strings.ReplaceAll(str, f.Secret, "REDACTED:"+f.RuleID)
+		if f.Secret == "" {
+			continue
 		}
+		if strings.HasPrefix(f.RuleID, "pii-") && !piiTags.MatchString(tag) {
+			continue
+		}
+		str = strings.ReplaceAll(str, f.Secret, "REDACTED:"+f.RuleID)
+		changed = true
 	}
-	return str, true
+	return str, changed
 }
