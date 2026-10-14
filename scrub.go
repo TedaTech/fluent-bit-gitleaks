@@ -4,9 +4,14 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"net/netip"
 	"regexp"
 	"strings"
 
+	"github.com/hoophq/alcatraz/analyzer"
+	"github.com/hoophq/alcatraz/anonymizer"
+	"github.com/hoophq/alcatraz/entities"
+	"github.com/hoophq/alcatraz/recognizers"
 	"github.com/spf13/viper"
 	"github.com/zricethezav/gitleaks/v8/config"
 	"github.com/zricethezav/gitleaks/v8/detect"
@@ -17,12 +22,23 @@ var rules string
 
 var scrubErrorRecord = []byte(`{"log":"REDACTED:scrub-error"}`)
 
-// pii-* rules apply only to tenant-facing records; node and audit logs keep
+// PII masking applies only to tenant-facing records; node and audit logs keep
 // their addresses (infra debugging, security forensics).
 var piiTags = regexp.MustCompile(`^(kube|events)(\.|$)`)
 
+var piiOps = anonymizer.Config{PerEntity: map[string]anonymizer.Operator{
+	entities.EmailAddress: anonymizer.ReplaceWith("REDACTED:pii-email"),
+	entities.IPAddress: func(_, match string) string {
+		if strings.Contains(match, ":") {
+			return "REDACTED:pii-ipv6"
+		}
+		return "REDACTED:pii-ipv4"
+	},
+}}
+
 type Scrubber struct {
-	d *detect.Detector
+	d   *detect.Detector
+	pii *analyzer.Engine
 }
 
 func NewScrubber() (*Scrubber, error) {
@@ -39,7 +55,13 @@ func NewScrubber() (*Scrubber, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Scrubber{d: detect.NewDetector(cfg)}, nil
+	reg := analyzer.NewRegistry("en")
+	reg.Add("en", recognizers.Email())
+	reg.Add("en", recognizers.IP())
+	return &Scrubber{
+		d:   detect.NewDetector(cfg),
+		pii: analyzer.NewEngine(reg, []string{"en"}),
+	}, nil
 }
 
 func (s *Scrubber) Scrub(tag string, record []byte) []byte {
@@ -86,20 +108,36 @@ func (s *Scrubber) visit(tag, context string, e any) (any, bool) {
 }
 
 func (s *Scrubber) redact(tag, context, str string) (string, bool) {
-	findings := s.d.DetectString(context + str)
-	if len(findings) == 0 {
-		return str, false
-	}
 	changed := false
-	for _, f := range findings {
+	for _, f := range s.d.DetectString(context + str) {
 		if f.Secret == "" {
-			continue
-		}
-		if strings.HasPrefix(f.RuleID, "pii-") && !piiTags.MatchString(tag) {
 			continue
 		}
 		str = strings.ReplaceAll(str, f.Secret, "REDACTED:"+f.RuleID)
 		changed = true
 	}
+	if piiTags.MatchString(tag) {
+		if out := s.redactPII(str); out != str {
+			str, changed = out, true
+		}
+	}
 	return str, changed
+}
+
+func (s *Scrubber) redactPII(str string) string {
+	results := s.pii.Analyze(str, analyzer.Options{})
+	kept := results[:0]
+	for _, r := range results {
+		if r.EntityType == entities.IPAddress {
+			a, err := netip.ParseAddr(r.Text)
+			if err != nil || !a.IsGlobalUnicast() || a.IsPrivate() {
+				continue
+			}
+		}
+		kept = append(kept, r)
+	}
+	if len(kept) == 0 {
+		return str
+	}
+	return anonymizer.AnonymizeWith(str, kept, piiOps)
 }

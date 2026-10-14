@@ -3,14 +3,16 @@
 A [fluent-bit](https://fluentbit.io) WASM filter that redacts secrets and
 personal data from log records using
 [gitleaks](https://github.com/gitleaks/gitleaks)' detector and default rule
-set — keyword prefilter, entropy checks and allowlists included.
+set — keyword prefilter, entropy checks and allowlists included — plus
+[alcatraz](https://github.com/hoophq/alcatraz)' email and IP recognizers for
+personal data.
 
 Every string field of a record is scanned; each finding is replaced with
 `REDACTED:<rule-id>`. A record the filter cannot decode is replaced with
 `{"log":"REDACTED:scrub-error"}` rather than passed through.
 
-Secret rules apply to every record. The `pii-*` rules (email addresses and
-public IPv4 addresses) apply only to records whose tag starts with `kube.` or
+Secret rules apply to every record. PII masking (`pii-email`, `pii-ipv4`,
+`pii-ipv6`) applies only to records whose tag starts with `kube.` or
 `events.` — tenant-facing container logs and Kubernetes events. Node and audit
 logs keep their addresses: infra debugging needs node and peer IPs, and the
 audit trail's source IPs are the security-forensics record, protected by access
@@ -74,16 +76,18 @@ Place it before any `rewrite_tag` so re-emitted records are not scanned twice.
 ## Rules
 
 `gitleaks.toml` extends gitleaks' default rules (pinned by the gitleaks version
-in `go.mod`) with:
+in `go.mod`) with `kv-pair-secret` — protobuf-text key/value pairs such as
+`secrets:{key:"secret-key" value:"…"}`, raw or JSON-escaped, a shape the
+default rules miss.
 
-- `kv-pair-secret` — protobuf-text key/value pairs such as
-  `secrets:{key:"secret-key" value:"…"}`, raw or JSON-escaped, a shape the
-  default rules miss.
-- `pii-email`, `pii-ipv4` — personal data, tag-scoped as described above.
-  `pii-ipv4` allowlists RFC1918, loopback, link-local and `0.0.0.0`, so only
-  public addresses are masked; a four-part version string (`1.2.3.4-rc1`)
-  matches by accepted design — a lost version string costs less than a shipped
-  client IP.
+Personal data is detected by alcatraz's Presidio-derived email and IP
+recognizers (pinned by the alcatraz version in `go.mod`), not by hand-written
+rules. Detected IPs are masked only when `net/netip` classifies them as public
+(global unicast and not private): RFC1918, loopback, link-local, multicast,
+broadcast, `0.0.0.0` and IPv6 ULA all pass through. Full-form IPv6 addresses
+are masked as `pii-ipv6`; a four-part version string (`1.2.3.4-rc1`) matches
+by accepted design — a lost version string costs less than a shipped client
+IP.
 
 ## Performance
 
