@@ -1,12 +1,20 @@
 # fluent-bit-gitleaks
 
-A [fluent-bit](https://fluentbit.io) WASM filter that redacts secrets from log
-records using [gitleaks](https://github.com/gitleaks/gitleaks)' detector and
-default rule set — keyword prefilter, entropy checks and allowlists included.
+A [fluent-bit](https://fluentbit.io) WASM filter that redacts secrets and
+personal data from log records using
+[gitleaks](https://github.com/gitleaks/gitleaks)' detector and default rule
+set — keyword prefilter, entropy checks and allowlists included.
 
 Every string field of a record is scanned; each finding is replaced with
 `REDACTED:<rule-id>`. A record the filter cannot decode is replaced with
 `{"log":"REDACTED:scrub-error"}` rather than passed through.
+
+Secret rules apply to every record. The `pii-*` rules (email addresses and
+public IPv4 addresses) apply only to records whose tag starts with `kube.` or
+`events.` — tenant-facing container logs and Kubernetes events. Node and audit
+logs keep their addresses: infra debugging needs node and peer IPs, and the
+audit trail's source IPs are the security-forensics record, protected by access
+control and retention instead of masking.
 
 ```
 {"log":"connecting with api_key=q8Rf2LxW9mTz4KcVb7NpYs3H"}
@@ -66,9 +74,16 @@ Place it before any `rewrite_tag` so re-emitted records are not scanned twice.
 ## Rules
 
 `gitleaks.toml` extends gitleaks' default rules (pinned by the gitleaks version
-in `go.mod`) with `kv-pair-secret`, which catches protobuf-text key/value pairs
-such as `secrets:{key:"secret-key" value:"…"}`, raw or JSON-escaped — a shape
-the default rules miss.
+in `go.mod`) with:
+
+- `kv-pair-secret` — protobuf-text key/value pairs such as
+  `secrets:{key:"secret-key" value:"…"}`, raw or JSON-escaped, a shape the
+  default rules miss.
+- `pii-email`, `pii-ipv4` — personal data, tag-scoped as described above.
+  `pii-ipv4` allowlists RFC1918, loopback, link-local and `0.0.0.0`, so only
+  public addresses are masked; a four-part version string (`1.2.3.4-rc1`)
+  matches by accepted design — a lost version string costs less than a shipped
+  client IP.
 
 ## Performance
 

@@ -38,7 +38,8 @@ func free(p uint32) {
 
 //go:wasmexport scrub
 func scrub(tag uint32, tagLen uint32, sec uint32, nsec uint32, record uint32, recordLen uint32) uint32 {
+	tg := string(unsafe.Slice((*byte)(unsafe.Pointer(uintptr(tag))), tagLen))
 	in := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(record))), recordLen)
-	result = append(scrubber.Scrub(in), 0)
+	result = append(scrubber.Scrub(tg, in), 0)
 	return uint32(uintptr(unsafe.Pointer(unsafe.SliceData(result))))
 }
