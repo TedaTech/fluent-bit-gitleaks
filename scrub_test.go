@@ -80,6 +80,7 @@ func TestScrubPII(t *testing.T) {
 		{"public ip in event", "events.0", "connection refused from 203.0.114.9", "203.0.114.9", "pii-ipv4"},
 		{"first public 172", "kube.test", "peer 172.32.0.1 timed out", "172.32.0.1", "pii-ipv4"},
 		{"four-part version masked by design", "kube.test", "running build 8.30.1.7", "8.30.1.7", "pii-ipv4"},
+		{"public ipv6 full form", "kube.test", "request from 2001:db8:85a3:8d3:1319:8a2e:370:7348 denied", "2001:db8:85a3:8d3:1319:8a2e:370:7348", "pii-ipv6"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -96,7 +97,7 @@ func TestScrubPII(t *testing.T) {
 
 func TestScrubPIIKeepsPrivateRanges(t *testing.T) {
 	s := scrubber(t)
-	for _, ip := range []string{"10.0.7.136", "127.0.0.1", "169.254.1.1", "192.168.1.1", "172.16.0.1", "172.31.255.255", "0.0.0.0"} {
+	for _, ip := range []string{"10.0.7.136", "127.0.0.1", "169.254.1.1", "192.168.1.1", "172.16.0.1", "172.31.255.255", "0.0.0.0", "224.0.0.1", "255.255.255.255", "fd00:0:0:0:0:0:0:1", "fe80:0:0:0:0:0:0:1"} {
 		t.Run(ip, func(t *testing.T) {
 			line := "dialing " + ip + ":8080"
 			if out := scrubTagged(t, s, "kube.test", line); out != line {
