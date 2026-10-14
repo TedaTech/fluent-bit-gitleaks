@@ -16,6 +16,7 @@ keywords = ["value:"]
 id = "pii-email"
 description = "Personal data: email address"
 regex = '''[a-zA-Z0-9][a-zA-Z0-9._%+-]*@[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}'''
+keywords = ["@"]
 
 [[rules]]
 id = "pii-ipv4"
