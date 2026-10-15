@@ -3,6 +3,9 @@ name: release
 on:
   push:
     tags: ['v*']
+  # semantic-release pushes tags with GITHUB_TOKEN, which never triggers the
+  # tag-push event; its workflow dispatches this one on the new tag instead.
+  workflow_dispatch:
 
 permissions:
   contents: read

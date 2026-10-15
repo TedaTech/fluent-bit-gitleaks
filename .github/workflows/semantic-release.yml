@@ -1,0 +1,30 @@
+name: semantic-release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: npx semantic-release@24
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      # A tag pushed with the workflow's GITHUB_TOKEN never triggers the
+      # tag-push release workflow (recursion guard), so dispatch it.
+      - run: |
+          git fetch --tags --quiet
+          tag=$(git tag --points-at HEAD 'v*' | head -1)
+          [ -z "$tag" ] || gh workflow run release.yml --ref "$tag"
+        env:
+          GH_TOKEN: ${{ github.token }}
