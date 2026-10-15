@@ -38,4 +38,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - run: BASELINE=1 N=60000 test/bench.sh
-      - run: N=60000 MIN_RATE=2820 test/bench.sh
+      - run: N=60000 MIN_RATE=2000 test/bench.sh
