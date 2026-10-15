@@ -24,14 +24,23 @@ metric() {
 }
 until [ "$(metric input records)" -gt 0 ]; do running; done
 start=$(date +%s.%N)
-peak=0
-until [ "$(metric output proc_records)" -ge "$n" ]; do
-  running
-  m=$(docker stats --no-stream --format '{{.MemUsage}}' fbg-bench | awk '{print $1}')
-  peak=$(python3 -c "import re;v,u=re.match(r'([\d.]+)(\w+)','$m').groups();print(max($peak,float(v)*{'B':2**-20,'kB':2**-10,'KiB':2**-10,'MiB':1,'MB':1,'GiB':1024,'GB':1024}[u]))")
-done
+# docker stats --no-stream blocks ~2s; sampling it in the completion poll
+# rounded the measured duration up to that tick.
+(
+  peak=0
+  while :; do
+    m=$(docker stats --no-stream --format '{{.MemUsage}}' fbg-bench | awk '{print $1}')
+    peak=$(python3 -c "import re;v,u=re.match(r'([\d.]+)(\w+)','$m').groups();print(max($peak,float(v)*{'B':2**-20,'kB':2**-10,'KiB':2**-10,'MiB':1,'MB':1,'GiB':1024,'GB':1024}[u]))")
+    echo "$peak" > "$work/peak"
+  done
+) &
+sampler=$!
+until [ "$(metric output proc_records)" -ge "$n" ]; do running; sleep 0.05; done
 end=$(date +%s.%N)
+kill "$sampler" 2>/dev/null || true
+wait "$sampler" 2>/dev/null || true
 docker stop fbg-bench >/dev/null
+peak=$(cat "$work/peak" 2>/dev/null || echo 0)
 rate=$(python3 -c "import sys;s,e,n=map(float,sys.argv[1:]);print(int(n/(e-s)))" "$start" "$end" "$n")
 python3 -c "import sys;print(f'{sys.argv[1]}: {sys.argv[2]} records, {sys.argv[3]} rec/s, peak mem {float(sys.argv[4]):.0f} MiB')" \
   "$mode" "$n" "$rate" "$peak"
